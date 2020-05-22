@@ -1,0 +1,18 @@
+FROM golang:alpine as ndt-server-build
+RUN apk add --no-cache git gcc linux-headers musl-dev
+ADD . /go/src/github.com/m-lab/ndt-server
+# ADD ndt5-client-go /go/src/github.com/m-lab/ndt5-client-go
+RUN /go/src/github.com/m-lab/ndt-server/build.sh
+#RUN go get /go/src/github.com/m-lab/ndt5-client-go/cmd/ndt5-client
+
+# Now copy the built image into the minimal base image
+#FROM alpine
+#COPY --from=ndt-server-build /go/bin/ndt-server /
+#COPY --from=ndt-server-build /go/bin/ndt5-client /
+RUN apk add --no-cache ca-certificates bash vim
+ADD ./ca-cert.pem /usr/share/ca-certificates/mozilla/localhost.crt
+RUN sh -c 'echo "mozilla/localhost.crt" >> /etc/ca-certificates.conf'
+RUN update-ca-certificates
+ADD ./html /html
+WORKDIR /
+ENTRYPOINT ["/go/bin/ndt-server"]
