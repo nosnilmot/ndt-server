@@ -3,7 +3,6 @@ package handler
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -186,13 +185,13 @@ func (h Handler) writeResult(uuid string, kind spec.SubtestKind, result *data.ND
 }
 
 func getData(conn *websocket.Conn) (*model.ArchivalData, error) {
-	// TODO(m-lab/ndt-server/issues/235): delete the fdcache.
-	netConn := conn.UnderlyingConn()
-	// TODO: check that type cast is valid.
-	mc, ok := netConn.(*listener.MagicConn)
-	if !ok {
-		log.Fatalf("Failed to convert netconn to magic conn: %s", netConn.RemoteAddr())
-	}
+	// NOTE: the underlying conn type may differ depending on whether the
+	// server is TLS or not. In both cases, we use the MagicListener, which
+	// allows returning the underlying MagicConn through the LocalAddr.  This
+	// indirection is necessary to avoid the fdcache and because the tls.Conn
+	// is not an interface, and does not allow access to the underlying
+	// net.Conn.
+	mc := conn.UnderlyingConn().LocalAddr().(*listener.MagicAddr).GetConn()
 	uuid, err := mc.GetUUID()
 	if err != nil {
 		logging.Logger.WithError(err).Warn("fdcache.GetUUID failed")

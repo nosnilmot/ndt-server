@@ -4,7 +4,6 @@ package measurer
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/m-lab/ndt-server/ndt7/listener"
@@ -30,13 +29,8 @@ func New(conn *websocket.Conn, UUID string) *Measurer {
 	}
 }
 
-func (m *Measurer) getSocketAndPossiblyEnableBBR() (*listener.MagicConn, error) {
-	// fp := fdcache.GetAndForgetFile(m.conn.UnderlyingConn())
-	c := m.conn.UnderlyingConn()
-	mc, ok := c.(*listener.MagicConn)
-	if !ok {
-		log.Fatalf("Failed to extract magic conn from conn: %s", c.RemoteAddr())
-	}
+func (m *Measurer) getSocketAndPossiblyEnableBBR() (listener.MagicBBRConn, error) {
+	mc := m.conn.UnderlyingConn().LocalAddr().(*listener.MagicAddr).GetConn()
 	err := mc.EnableBBR()
 	if err != nil {
 		logging.Logger.WithError(err).Warn("Cannot enable BBR")
@@ -45,11 +39,11 @@ func (m *Measurer) getSocketAndPossiblyEnableBBR() (*listener.MagicConn, error) 
 	return mc, nil
 }
 
-func measure(measurement *model.Measurement, mc *listener.MagicConn, elapsed time.Duration) {
+func measure(measurement *model.Measurement, mc listener.MagicBBRConn, elapsed time.Duration) {
 	// Implementation note: we always want to sample BBR before TCPInfo so we
 	// will know from TCPInfo if the connection has been closed.
 	t := int64(elapsed / time.Microsecond)
-	bbrinfo, tcpInfo, err := mc.ReadBBRInfoAndTCPInfo()
+	bbrinfo, tcpInfo, err := mc.ReadInfo()
 	if err == nil {
 		measurement.BBRInfo = &model.BBRInfo{
 			BBRInfo:     bbrinfo,
