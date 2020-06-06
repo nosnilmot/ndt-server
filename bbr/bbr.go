@@ -7,7 +7,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/m-lab/ndt-server/ndt7/model"
+	"github.com/m-lab/tcp-info/inetdiag"
 )
 
 // ErrNoSupport indicates that this system does not support BBR.
@@ -19,6 +19,6 @@ func Enable(fp *os.File) error {
 }
 
 // GetMaxBandwidthAndMinRTT obtains BBR info from |fp|.
-func GetMaxBandwidthAndMinRTT(fp *os.File) (model.BBRInfo, error) {
+func GetMaxBandwidthAndMinRTT(fp *os.File) (inetdiag.BBRInfo, error) {
 	return getMaxBandwidthAndMinRTT(fp)
 }
