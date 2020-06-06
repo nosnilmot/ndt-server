@@ -3,6 +3,7 @@ package handler
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,11 +16,11 @@ import (
 	"github.com/m-lab/go/prometheusx"
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/ndt-server/data"
-	"github.com/m-lab/ndt-server/fdcache"
 	"github.com/m-lab/ndt-server/logging"
 	"github.com/m-lab/ndt-server/metadata"
 	"github.com/m-lab/ndt-server/metrics"
 	"github.com/m-lab/ndt-server/ndt7/download"
+	"github.com/m-lab/ndt-server/ndt7/listener"
 	"github.com/m-lab/ndt-server/ndt7/model"
 	"github.com/m-lab/ndt-server/ndt7/results"
 	"github.com/m-lab/ndt-server/ndt7/spec"
@@ -187,7 +188,12 @@ func (h Handler) writeResult(uuid string, kind spec.SubtestKind, result *data.ND
 func getData(conn *websocket.Conn) (*model.ArchivalData, error) {
 	// TODO(m-lab/ndt-server/issues/235): delete the fdcache.
 	netConn := conn.UnderlyingConn()
-	uuid, err := fdcache.GetUUID(netConn)
+	// TODO: check that type cast is valid.
+	mc, ok := netConn.(*listener.MagicConn)
+	if !ok {
+		log.Fatalf("Failed to convert netconn to magic conn: %s", netConn.RemoteAddr())
+	}
+	uuid, err := mc.GetUUID()
 	if err != nil {
 		logging.Logger.WithError(err).Warn("fdcache.GetUUID failed")
 		return nil, err
