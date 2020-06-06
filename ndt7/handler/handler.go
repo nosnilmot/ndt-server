@@ -148,7 +148,7 @@ func setupResult(conn *websocket.Conn) *data.NDT7Result {
 	if !ok {
 		clientAddr = &net.TCPAddr{IP: net.ParseIP("::1"), Port: 1}
 	}
-	serverAddr, ok := conn.LocalAddr().(*net.TCPAddr)
+	serverAddr, ok := conn.LocalAddr().(*listener.MagicAddr).Addr.(*net.TCPAddr)
 	if !ok {
 		serverAddr = &net.TCPAddr{IP: net.ParseIP("::1"), Port: 1}
 	}

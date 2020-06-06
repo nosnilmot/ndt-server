@@ -66,7 +66,7 @@ func (mc *MagicConn) EnableBBR() error {
 func (mc *MagicConn) ReadInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error) {
 	bbrinfo, err := bbr.GetMaxBandwidthAndMinRTT(mc.File)
 	if err != nil {
-		return inetdiag.BBRInfo{}, tcp.LinuxTCPInfo{}, err
+		bbrinfo = inetdiag.BBRInfo{}
 	}
 	tcpInfo, err := tcpinfox.GetTCPInfo(mc.File)
 	if err != nil {

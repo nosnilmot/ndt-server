@@ -15,13 +15,12 @@ import (
 
 	ndt5metrics "github.com/m-lab/ndt-server/ndt5/metrics"
 	"github.com/m-lab/ndt-server/ndt5/protocol"
-	"github.com/m-lab/ndt-server/ndt5/tcplistener"
 )
 
 // wsServer is a single-serving server for unencrypted websockets.
 type wsServer struct {
 	srv        *http.Server
-	listener   *listener.CachingTCPKeepAliveListener
+	listener   *listener.MagicListener
 	port       int
 	direction  string
 	newConn    protocol.MeasuredConnection
@@ -120,7 +119,7 @@ func listenWS(direction string) (*wsServer, error) {
 	}
 	tcpl := l.(*net.TCPListener)
 	s.port = tcpl.Addr().(*net.TCPAddr).Port
-	s.listener = &listener.CachingTCPKeepAliveListener{TCPListener: tcpl}
+	s.listener = &listener.MagicListener{TCPListener: tcpl}
 	return s, nil
 }
 
@@ -211,7 +210,7 @@ func ListenPlain(direction string) (ndt.SingleMeasurementServer, error) {
 		return nil, err
 	}
 	tcpl := l.(*net.TCPListener)
-	s.listener = &tcplistener.RawListener{TCPListener: tcpl}
-	s.port = s.listener.Addr().(*net.TCPAddr).Port
+	s.port = tcpl.Addr().(*net.TCPAddr).Port
+	s.listener = &listener.MagicListener{TCPListener: tcpl}
 	return s, nil
 }
