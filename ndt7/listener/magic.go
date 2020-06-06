@@ -26,9 +26,30 @@ type MagicConn struct {
 	File *os.File
 }
 
+type MagicAddr struct {
+	net.Addr
+	mc *MagicConn
+}
+
+type MagicBBRConn interface {
+	GetUUID() (string, error)
+	EnableBBR() error
+	ReadInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error)
+}
+
+func (ma *MagicAddr) GetConn() MagicBBRConn {
+	return ma.mc
+}
+
+func (mc *MagicConn) LocalAddr() net.Addr {
+	return &MagicAddr{
+		Addr: mc.Conn.LocalAddr(),
+		mc:   mc,
+	}
+}
+
 // Close the underlying TCPConn and duplicate file pointer.
 func (mc *MagicConn) Close() error {
-	log.Println("MagicConn: CLOSE", mc.Conn.RemoteAddr())
 	mc.File.Close()
 	return mc.Conn.Close()
 }
@@ -36,15 +57,13 @@ func (mc *MagicConn) Close() error {
 // EnableBBR sets the BBR congestion control on the TCP connection if supported
 // by the kernel. If unsupported, EnableBBR has no effect.
 func (mc *MagicConn) EnableBBR() error {
-	log.Println("MagicConn: BBR ENABLE", mc.Conn.RemoteAddr())
 	return bbr.Enable(mc.File)
 }
 
-// ReadBBRInfoAndTCPInfo reads metadata about the TCP connections. If BBR was
-// not enabled on the underlying connection, then ReadBBRInfoAndTCPInfo will
+// ReadInfo reads metadata about the TCP connections. If BBR was
+// not enabled on the underlying connection, then ReadInfo will
 // return an error.
-func (mc *MagicConn) ReadBBRInfoAndTCPInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error) {
-	log.Println("MagicConn: READ BBR INFO", mc.Conn.RemoteAddr())
+func (mc *MagicConn) ReadInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error) {
 	bbrinfo, err := bbr.GetMaxBandwidthAndMinRTT(mc.File)
 	if err != nil {
 		return inetdiag.BBRInfo{}, tcp.LinuxTCPInfo{}, err
@@ -71,7 +90,6 @@ func (mc *MagicConn) GetUUID() (string, error) {
 			return "", errors.New("unable to fallback to uuid: invalid uuid")
 		}
 	}
-	log.Println("MagicConn: GET UUID", mc.Conn.RemoteAddr(), id)
 	return id, nil
 }
 
