@@ -1,6 +1,7 @@
 package listener
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
@@ -45,6 +46,28 @@ func (mc *MagicConn) LocalAddr() net.Addr {
 	return &MagicAddr{
 		Addr: mc.Conn.LocalAddr(),
 		mc:   mc,
+	}
+}
+
+func ToTCPAddr(addr net.Addr) *net.TCPAddr {
+	switch a := addr.(type) {
+	case *MagicAddr:
+		return a.Addr.(*net.TCPAddr)
+	case *net.TCPAddr:
+		return a
+	default:
+		panic(fmt.Sprintf("unsupported conn type: %T", a))
+	}
+}
+
+func ToBBRConn(conn net.Conn) MagicBBRConn {
+	switch c := conn.(type) {
+	case *MagicConn:
+		return c
+	case *tls.Conn:
+		return c.LocalAddr().(*MagicAddr).GetConn()
+	default:
+		panic(fmt.Sprintf("unsupported conn type: %T", c))
 	}
 }
 

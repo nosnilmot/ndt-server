@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -198,21 +197,13 @@ func (ws *wsConnection) FillUntil(t time.Time, bytes []byte) (bytesWritten int64
 
 func (ws *wsConnection) StartMeasuring(ctx context.Context) {
 	// Measurer closes the fd returned by GetAndForgetFile.
-	mc := ws.Conn.UnderlyingConn().LocalAddr().(*listener.MagicAddr).GetConn()
+	mc := listener.ToBBRConn(ws.Conn.UnderlyingConn())
 	ws.measurer.StartMeasuring(ctx, mc)
 }
 
 func (ws *wsConnection) UUID() string {
-	var id string
-	var err error
-	switch c := ws.Conn.UnderlyingConn().(type) {
-	case *tls.Conn:
-		id, err = c.LocalAddr().(*listener.MagicAddr).GetConn().GetUUID()
-	case *listener.MagicConn:
-		id, err = c.GetUUID()
-	default:
-		panic("unknown conn type")
-	}
+	mc := listener.ToBBRConn(ws.Conn.UnderlyingConn())
+	id, err := mc.GetUUID()
 	if err != nil {
 		log.Println("Could not discover UUID:", err)
 		// TODO: increment a metric
@@ -222,12 +213,12 @@ func (ws *wsConnection) UUID() string {
 }
 
 func (ws *wsConnection) ServerIPAndPort() (string, int) {
-	localAddr := ws.UnderlyingConn().LocalAddr().(*listener.MagicAddr).Addr.(*net.TCPAddr)
+	localAddr := listener.ToTCPAddr(ws.UnderlyingConn().LocalAddr())
 	return localAddr.IP.String(), localAddr.Port
 }
 
 func (ws *wsConnection) ClientIPAndPort() (string, int) {
-	remoteAddr := ws.UnderlyingConn().RemoteAddr().(*net.TCPAddr)
+	remoteAddr := listener.ToTCPAddr(ws.UnderlyingConn().RemoteAddr())
 	return remoteAddr.IP.String(), remoteAddr.Port
 }
 
@@ -297,7 +288,8 @@ func (nc *netConnection) FillUntil(t time.Time, bytes []byte) (bytesWritten int6
 
 func (nc *netConnection) StartMeasuring(ctx context.Context) {
 	// Measurer closes the fd returned by GetAndForgetFile.
-	mc := nc.Conn.LocalAddr().(*listener.MagicAddr).GetConn()
+	// mc := nc.Conn.LocalAddr().(*listener.MagicAddr).GetConn()
+	mc := listener.ToBBRConn(nc.Conn) // .LocalAddr().(*listener.MagicAddr).GetConn()
 	nc.measurer.StartMeasuring(ctx, mc)
 }
 
@@ -317,12 +309,12 @@ func (nc *netConnection) UUID() string {
 }
 
 func (nc *netConnection) ServerIPAndPort() (string, int) {
-	localAddr := nc.LocalAddr().(*listener.MagicAddr).Addr.(*net.TCPAddr)
+	localAddr := listener.ToTCPAddr(nc.LocalAddr()) // .(*listener.MagicAddr).Addr.(*net.TCPAddr)
 	return localAddr.IP.String(), localAddr.Port
 }
 
 func (nc *netConnection) ClientIPAndPort() (string, int) {
-	remoteAddr := nc.RemoteAddr().(*net.TCPAddr)
+	remoteAddr := listener.ToTCPAddr(nc.RemoteAddr()) // .(*net.TCPAddr)
 	return remoteAddr.IP.String(), remoteAddr.Port
 }
 
