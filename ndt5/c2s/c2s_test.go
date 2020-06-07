@@ -9,17 +9,17 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/m-lab/ndt-server/magic"
 	"github.com/m-lab/ndt-server/ndt5/singleserving"
 
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/ndt-server/ndt5/protocol"
-	"github.com/m-lab/ndt-server/ndt7/listener"
 )
 
 func MustMakeNetConnection(ctx context.Context) (protocol.MeasuredConnection, net.Conn) {
 	ll, err := net.Listen("tcp", "127.0.0.1:0")
 	rtx.Must(err, "Could not listen")
-	tl := &listener.MagicListener{TCPListener: ll.(*net.TCPListener)}
+	tl := &magic.Listener{TCPListener: ll.(*net.TCPListener)}
 	conns := make(chan net.Conn)
 	defer close(conns)
 	go func() {

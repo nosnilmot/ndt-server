@@ -1,4 +1,4 @@
-package listener
+package magic
 
 import (
 	"crypto/tls"
@@ -18,75 +18,64 @@ import (
 	"github.com/m-lab/uuid"
 )
 
-type MagicListener struct {
+type Listener struct {
 	*net.TCPListener
 }
 
-type MagicConn struct {
+type Conn struct {
 	net.Conn
 	File *os.File
 }
 
-type MagicAddr struct {
+type Addr struct {
 	net.Addr
-	mc *MagicConn
+	mc *Conn
 }
 
-type MagicBBRConn interface {
+type ConnInfo interface {
 	GetUUID() (string, error)
 	EnableBBR() error
 	ReadInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error)
 }
 
-func (ma *MagicAddr) GetConn() MagicBBRConn {
-	return ma.mc
-}
-
-func (mc *MagicConn) LocalAddr() net.Addr {
-	return &MagicAddr{
-		Addr: mc.Conn.LocalAddr(),
-		mc:   mc,
+// Accept a connection, set its keepalive time, and return a Conn that enables
+// actions on the underlying net.Conn file descriptor.
+func (ln *Listener) Accept() (net.Conn, error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return nil, err
 	}
-}
-
-func ToTCPAddr(addr net.Addr) *net.TCPAddr {
-	switch a := addr.(type) {
-	case *MagicAddr:
-		return a.Addr.(*net.TCPAddr)
-	case *net.TCPAddr:
-		return a
-	default:
-		panic(fmt.Sprintf("unsupported conn type: %T", a))
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+	fp, err := fdcache.TCPConnToFile(tc)
+	if err != nil {
+		log.Println("Error: could not read *os.File for connection from:", tc.RemoteAddr())
+		tc.Close()
+		return nil, err
 	}
-}
-
-func ToBBRConn(conn net.Conn) MagicBBRConn {
-	switch c := conn.(type) {
-	case *MagicConn:
-		return c
-	case *tls.Conn:
-		return c.LocalAddr().(*MagicAddr).GetConn()
-	default:
-		panic(fmt.Sprintf("unsupported conn type: %T", c))
+	mc := &Conn{
+		Conn: tc,
+		File: fp,
 	}
+	return mc, nil
 }
 
 // Close the underlying TCPConn and duplicate file pointer.
-func (mc *MagicConn) Close() error {
+func (mc *Conn) Close() error {
 	mc.File.Close()
 	return mc.Conn.Close()
 }
 
 // EnableBBR sets the BBR congestion control on the TCP connection if supported
 // by the kernel. If unsupported, EnableBBR has no effect.
-func (mc *MagicConn) EnableBBR() error {
+func (mc *Conn) EnableBBR() error {
 	return bbr.Enable(mc.File)
 }
 
 // ReadInfo reads metadata about the TCP connections. If BBR was
 // not enabled on the underlying connection, then ReadInfo will
 // return an error.
-func (mc *MagicConn) ReadInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error) {
+func (mc *Conn) ReadInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error) {
 	bbrinfo, err := bbr.GetMaxBandwidthAndMinRTT(mc.File)
 	if err != nil {
 		bbrinfo = inetdiag.BBRInfo{}
@@ -99,7 +88,7 @@ func (mc *MagicConn) ReadInfo() (inetdiag.BBRInfo, tcp.LinuxTCPInfo, error) {
 }
 
 // GetUUID returns the connection's UUID.
-func (mc *MagicConn) GetUUID() (string, error) {
+func (mc *Conn) GetUUID() (string, error) {
 	id, err := uuid.FromFile(mc.File)
 	if err != nil {
 		// Use UUID v1 as fallback when SO_COOKIE isn't supported by kernel
@@ -116,22 +105,35 @@ func (mc *MagicConn) GetUUID() (string, error) {
 	return id, nil
 }
 
-func (ln *MagicListener) Accept() (net.Conn, error) {
-	tc, err := ln.AcceptTCP()
-	if err != nil {
-		return nil, err
+func (mc *Conn) LocalAddr() net.Addr {
+	return &Addr{
+		Addr: mc.Conn.LocalAddr(),
+		mc:   mc,
 	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	fp, err := fdcache.TCPConnToFile(tc)
-	if err != nil {
-		log.Println("Error: could not read *os.File for connection from:", tc.RemoteAddr())
-		tc.Close()
-		return nil, err
+}
+
+func ToTCPAddr(addr net.Addr) *net.TCPAddr {
+	switch a := addr.(type) {
+	case *Addr:
+		return a.Addr.(*net.TCPAddr)
+	case *net.TCPAddr:
+		return a
+	default:
+		panic(fmt.Sprintf("unsupported conn type: %T", a))
 	}
-	mc := &MagicConn{
-		Conn: tc,
-		File: fp,
+}
+
+func ToConnInfo(conn net.Conn) ConnInfo {
+	switch c := conn.(type) {
+	case *Conn:
+		return c
+	case *tls.Conn:
+		return c.LocalAddr().(*Addr).GetConn()
+	default:
+		panic(fmt.Sprintf("unsupported conn type: %T", c))
 	}
-	return mc, nil
+}
+
+func (ma *Addr) GetConn() ConnInfo {
+	return ma.mc
 }

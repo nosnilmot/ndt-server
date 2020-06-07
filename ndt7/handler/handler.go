@@ -16,10 +16,10 @@ import (
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/ndt-server/data"
 	"github.com/m-lab/ndt-server/logging"
+	"github.com/m-lab/ndt-server/magic"
 	"github.com/m-lab/ndt-server/metadata"
 	"github.com/m-lab/ndt-server/metrics"
 	"github.com/m-lab/ndt-server/ndt7/download"
-	"github.com/m-lab/ndt-server/ndt7/listener"
 	"github.com/m-lab/ndt-server/ndt7/model"
 	"github.com/m-lab/ndt-server/ndt7/results"
 	"github.com/m-lab/ndt-server/ndt7/spec"
@@ -144,11 +144,11 @@ func setupConn(writer http.ResponseWriter, request *http.Request) *websocket.Con
 func setupResult(conn *websocket.Conn) *data.NDT7Result {
 	// NOTE: unless we plan to run the NDT server over different protocols than TCP,
 	// then we expect RemoteAddr and LocalAddr to always return net.TCPAddr types.
-	clientAddr, ok := conn.RemoteAddr().(*net.TCPAddr)
+	clientAddr, ok := magic.ToTCPAddr(conn.RemoteAddr())
 	if !ok {
 		clientAddr = &net.TCPAddr{IP: net.ParseIP("::1"), Port: 1}
 	}
-	serverAddr, ok := conn.LocalAddr().(*listener.MagicAddr).Addr.(*net.TCPAddr)
+	serverAddr, ok := magic.ToTCPAddr(conn.LocalAddr())
 	if !ok {
 		serverAddr = &net.TCPAddr{IP: net.ParseIP("::1"), Port: 1}
 	}
@@ -186,12 +186,12 @@ func (h Handler) writeResult(uuid string, kind spec.SubtestKind, result *data.ND
 
 func getData(conn *websocket.Conn) (*model.ArchivalData, error) {
 	// NOTE: the underlying conn type may differ depending on whether the
-	// server is TLS or not. In both cases, we use the MagicListener, which
-	// allows returning the underlying MagicConn through the LocalAddr.  This
+	// server is TLS or not. In both cases, we use the magic.Listener, which
+	// allows returning the underlying magic.Conn through the LocalAddr.  This
 	// indirection is necessary to avoid the fdcache and because the tls.Conn
 	// is not an interface, and does not allow access to the underlying
 	// net.Conn.
-	mc := conn.UnderlyingConn().LocalAddr().(*listener.MagicAddr).GetConn()
+	mc := magic.ToConnInfo(conn.UnderlyingConn())
 	uuid, err := mc.GetUUID()
 	if err != nil {
 		logging.Logger.WithError(err).Warn("fdcache.GetUUID failed")

@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/m-lab/ndt-server/magic"
 	"github.com/m-lab/ndt-server/ndt5/ndt"
 
 	"github.com/m-lab/ndt-server/ndt5/ws"
-	"github.com/m-lab/ndt-server/ndt7/listener"
 
 	ndt5metrics "github.com/m-lab/ndt-server/ndt5/metrics"
 	"github.com/m-lab/ndt-server/ndt5/protocol"
@@ -20,7 +20,7 @@ import (
 // wsServer is a single-serving server for unencrypted websockets.
 type wsServer struct {
 	srv        *http.Server
-	listener   *listener.MagicListener
+	listener   *magic.Listener
 	port       int
 	direction  string
 	newConn    protocol.MeasuredConnection
@@ -119,7 +119,7 @@ func listenWS(direction string) (*wsServer, error) {
 	}
 	tcpl := l.(*net.TCPListener)
 	s.port = tcpl.Addr().(*net.TCPAddr).Port
-	s.listener = &listener.MagicListener{TCPListener: tcpl}
+	s.listener = &magic.Listener{TCPListener: tcpl}
 	return s, nil
 }
 
@@ -211,6 +211,6 @@ func ListenPlain(direction string) (ndt.SingleMeasurementServer, error) {
 	}
 	tcpl := l.(*net.TCPListener)
 	s.port = tcpl.Addr().(*net.TCPAddr).Port
-	s.listener = &listener.MagicListener{TCPListener: tcpl}
+	s.listener = &magic.Listener{TCPListener: tcpl}
 	return s, nil
 }

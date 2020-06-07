@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/m-lab/ndt-server/magic"
 	"github.com/m-lab/ndt-server/ndt5"
 	ndt5metrics "github.com/m-lab/ndt-server/ndt5/metrics"
 	"github.com/m-lab/ndt-server/ndt5/ndt"
 	"github.com/m-lab/ndt-server/ndt5/protocol"
 	"github.com/m-lab/ndt-server/ndt5/singleserving"
-	"github.com/m-lab/ndt-server/ndt7/listener"
 )
 
 // plainServer handles requests that are TCP-based but not HTTP(S) based. If it
@@ -26,7 +26,7 @@ import (
 type plainServer struct {
 	wsAddr   string
 	dialer   *net.Dialer
-	listener *listener.MagicListener
+	listener *magic.Listener
 	datadir  string
 	timeout  time.Duration
 }
@@ -133,7 +133,7 @@ func (ps *plainServer) ListenAndServe(ctx context.Context, addr string, tx Accep
 	if err != nil {
 		return err
 	}
-	ps.listener = &listener.MagicListener{TCPListener: ln.(*net.TCPListener)}
+	ps.listener = &magic.Listener{TCPListener: ln.(*net.TCPListener)}
 	// Close the listener when the context is canceled. We do this in a separate
 	// goroutine to ensure that context cancellation interrupts the Accept() call.
 	go func() {

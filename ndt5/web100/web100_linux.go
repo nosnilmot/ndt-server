@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/m-lab/ndt-server/ndt7/listener"
+	"github.com/m-lab/ndt-server/magic"
 
 	"github.com/m-lab/tcp-info/tcp"
 )
@@ -51,7 +51,7 @@ func summarize(snaps []tcp.LinuxTCPInfo) (*Metrics, error) {
 	return info, nil
 }
 
-func measureUntilContextCancellation(ctx context.Context, mc listener.MagicBBRConn) (*Metrics, error) {
+func measureUntilContextCancellation(ctx context.Context, ci magic.ConnInfo) (*Metrics, error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	// We need to make sure fp is closed when the polling loop ends to ensure legacy
 	// clients work. See https://github.com/m-lab/ndt-server/issues/160.
@@ -67,7 +67,7 @@ func measureUntilContextCancellation(ctx context.Context, mc listener.MagicBBRCo
 	// case the most recent measurement should count as the last measurement).
 	for ; ctx.Err() == nil; <-ticker.C {
 		// Get the tcp_cc metrics
-		_, snapshot, err := mc.ReadInfo()
+		_, snapshot, err := ci.ReadInfo()
 		if err == nil {
 			snaps = append(snaps, snapshot)
 		} else {
@@ -81,13 +81,13 @@ func measureUntilContextCancellation(ctx context.Context, mc listener.MagicBBRCo
 // for the results. This function may or may not send socket information along
 // the channel, depending on whether or not an error occurred. The value is sent
 // along the channel sometime after the context is canceled.
-func MeasureViaPolling(ctx context.Context, mc listener.MagicBBRConn) <-chan *Metrics {
+func MeasureViaPolling(ctx context.Context, ci magic.ConnInfo) <-chan *Metrics {
 	// Give a capacity of 1 because we will only ever send one message and the
 	// buffer allows the component goroutine to exit when done, no matter what the
 	// client does.
 	c := make(chan *Metrics, 1)
 	go func() {
-		summary, err := measureUntilContextCancellation(ctx, mc)
+		summary, err := measureUntilContextCancellation(ctx, ci)
 		if err == nil {
 			c <- summary
 		}

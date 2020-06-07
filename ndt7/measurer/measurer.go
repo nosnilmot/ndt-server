@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/m-lab/ndt-server/ndt7/listener"
+	"github.com/m-lab/ndt-server/magic"
 
 	"github.com/gorilla/websocket"
 	"github.com/m-lab/go/memoryless"
@@ -29,8 +29,8 @@ func New(conn *websocket.Conn, UUID string) *Measurer {
 	}
 }
 
-func (m *Measurer) getSocketAndPossiblyEnableBBR() (listener.MagicBBRConn, error) {
-	mc := m.conn.UnderlyingConn().LocalAddr().(*listener.MagicAddr).GetConn()
+func (m *Measurer) getSocketAndPossiblyEnableBBR() (magic.ConnInfo, error) {
+	mc := magic.ToConnInfo(m.conn.UnderlyingConn())
 	err := mc.EnableBBR()
 	if err != nil {
 		logging.Logger.WithError(err).Warn("Cannot enable BBR")
@@ -39,7 +39,7 @@ func (m *Measurer) getSocketAndPossiblyEnableBBR() (listener.MagicBBRConn, error
 	return mc, nil
 }
 
-func measure(measurement *model.Measurement, mc listener.MagicBBRConn, elapsed time.Duration) {
+func measure(measurement *model.Measurement, mc magic.ConnInfo, elapsed time.Duration) {
 	// Implementation note: we always want to sample BBR before TCPInfo so we
 	// will know from TCPInfo if the connection has been closed.
 	t := int64(elapsed / time.Microsecond)
