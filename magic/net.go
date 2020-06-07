@@ -119,7 +119,8 @@ func ToTCPAddr(addr net.Addr) *net.TCPAddr {
 	case *net.TCPAddr:
 		return a
 	default:
-		panic(fmt.Sprintf("unsupported conn type: %T", a))
+		log.Fatalf("unsupported conn type: %T", a)
+		return nil
 	}
 }
 

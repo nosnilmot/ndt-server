@@ -144,12 +144,12 @@ func setupConn(writer http.ResponseWriter, request *http.Request) *websocket.Con
 func setupResult(conn *websocket.Conn) *data.NDT7Result {
 	// NOTE: unless we plan to run the NDT server over different protocols than TCP,
 	// then we expect RemoteAddr and LocalAddr to always return net.TCPAddr types.
-	clientAddr, ok := magic.ToTCPAddr(conn.RemoteAddr())
-	if !ok {
+	clientAddr := magic.ToTCPAddr(conn.RemoteAddr())
+	if clientAddr == nil {
 		clientAddr = &net.TCPAddr{IP: net.ParseIP("::1"), Port: 1}
 	}
-	serverAddr, ok := magic.ToTCPAddr(conn.LocalAddr())
-	if !ok {
+	serverAddr := magic.ToTCPAddr(conn.LocalAddr())
+	if serverAddr == nil {
 		serverAddr = &net.TCPAddr{IP: net.ParseIP("::1"), Port: 1}
 	}
 	result := &data.NDT7Result{
