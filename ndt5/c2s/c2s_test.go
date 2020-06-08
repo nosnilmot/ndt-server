@@ -19,7 +19,7 @@ import (
 func MustMakeNetConnection(ctx context.Context) (protocol.MeasuredConnection, net.Conn) {
 	ll, err := net.Listen("tcp", "127.0.0.1:0")
 	rtx.Must(err, "Could not listen")
-	tl := &magic.Listener{TCPListener: ll.(*net.TCPListener)}
+	tl := magic.NewListener(ll.(*net.TCPListener))
 	conns := make(chan net.Conn)
 	defer close(conns)
 	go func() {

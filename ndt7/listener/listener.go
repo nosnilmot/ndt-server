@@ -92,7 +92,7 @@ func ListenAndServeAsync(server *http.Server) error {
 	}
 	// Serve asynchronously.
 	// go serve(server, &CachingTCPKeepAliveListener{listener.(*net.TCPListener)})
-	go serve(server, &magic.Listener{TCPListener: listener.(*net.TCPListener)})
+	go serve(server, magic.NewListener(listener.(*net.TCPListener)))
 	return nil
 }
 
@@ -128,6 +128,6 @@ func ListenAndServeTLSAsync(server *http.Server, certFile, keyFile string) error
 	// do nothing in an attempt to avoid making a bad situation worse.
 
 	// Serve asynchronously.
-	go serveTLS(server, &magic.Listener{TCPListener: listener.(*net.TCPListener)}, certFile, keyFile)
+	go serveTLS(server, magic.NewListener(listener.(*net.TCPListener)), certFile, keyFile)
 	return nil
 }

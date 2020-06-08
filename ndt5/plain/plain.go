@@ -133,7 +133,7 @@ func (ps *plainServer) ListenAndServe(ctx context.Context, addr string, tx Accep
 	if err != nil {
 		return err
 	}
-	ps.listener = &magic.Listener{TCPListener: ln.(*net.TCPListener)}
+	ps.listener = magic.NewListener(ln.(*net.TCPListener))
 	// Close the listener when the context is canceled. We do this in a separate
 	// goroutine to ensure that context cancellation interrupts the Accept() call.
 	go func() {

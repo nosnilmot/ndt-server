@@ -119,7 +119,7 @@ func listenWS(direction string) (*wsServer, error) {
 	}
 	tcpl := l.(*net.TCPListener)
 	s.port = tcpl.Addr().(*net.TCPAddr).Port
-	s.listener = &magic.Listener{TCPListener: tcpl}
+	s.listener = magic.NewListener(tcpl)
 	return s, nil
 }
 
@@ -211,6 +211,6 @@ func ListenPlain(direction string) (ndt.SingleMeasurementServer, error) {
 	}
 	tcpl := l.(*net.TCPListener)
 	s.port = tcpl.Addr().(*net.TCPAddr).Port
-	s.listener = &magic.Listener{TCPListener: tcpl}
+	s.listener = magic.NewListener(tcpl)
 	return s, nil
 }
