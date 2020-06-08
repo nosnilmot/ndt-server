@@ -18,7 +18,7 @@ func Enable(fp *os.File) error {
 	return enableBBR(fp)
 }
 
-// GetMaxBandwidthAndMinRTT obtains BBR info from |fp|.
-func GetMaxBandwidthAndMinRTT(fp *os.File) (inetdiag.BBRInfo, error) {
+// GetBBRInfo obtains BBR info from |fp|.
+func GetBBRInfo(fp *os.File) (inetdiag.BBRInfo, error) {
 	return getMaxBandwidthAndMinRTT(fp)
 }
