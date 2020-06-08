@@ -91,7 +91,6 @@ func ListenAndServeAsync(server *http.Server) error {
 		server.Addr = listener.Addr().String()
 	}
 	// Serve asynchronously.
-	// go serve(server, &CachingTCPKeepAliveListener{listener.(*net.TCPListener)})
 	go serve(server, magic.NewListener(listener.(*net.TCPListener)))
 	return nil
 }
