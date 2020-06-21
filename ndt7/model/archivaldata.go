@@ -23,7 +23,7 @@ type ArchivalData struct {
 // structure is specified in the ndt7 specification.
 type Measurement struct {
 	AppInfo        *AppInfo        `json:",omitempty"`
-	ConnectionInfo *ConnectionInfo `json:",omitempty" bigquery:"-"`
+	ConnectionInfo *ConnectionInfo `json:",omitempty"` // bigquery:"-"`
 	BBRInfo        *BBRInfo        `json:",omitempty"`
 	TCPInfo        *TCPInfo        `json:",omitempty"`
 }
