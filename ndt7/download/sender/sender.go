@@ -2,12 +2,15 @@
 package sender
 
 import (
+	"context"
 	"math/rand"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/m-lab/ndt-server/logging"
 	"github.com/m-lab/ndt-server/ndt7/closer"
+	"github.com/m-lab/ndt-server/ndt7/measurer"
+	ndt7metrics "github.com/m-lab/ndt-server/ndt7/metrics"
 	"github.com/m-lab/ndt-server/ndt7/model"
 	"github.com/m-lab/ndt-server/ndt7/ping/message"
 	"github.com/m-lab/ndt-server/ndt7/spec"
@@ -22,57 +25,86 @@ func makePreparedMessage(size int) (*websocket.PreparedMessage, error) {
 	return websocket.NewPreparedMessage(websocket.BinaryMessage, data)
 }
 
-func loop(conn *websocket.Conn, src <-chan model.Measurement, dst chan<- model.Measurement, start time.Time) {
+// Start sends binary messages (bulk download) and measurement messages (status
+// messages) to the client conn. Each measurement message will also be saved to
+// data.
+//
+// Liveness guarantee: the sender will not be stuck sending for more than the
+// MaxRuntime of the subtest. This is enforced by setting the write deadline to
+// Time.Now() + MaxRuntime.
+func Start(ctx context.Context, conn *websocket.Conn, data *model.ArchivalData) error {
 	logging.Logger.Debug("sender: start")
+	proto := ndt7metrics.ConnLabel(conn)
+
+	// Start collecting connection measurements. Measurements will be sent to
+	// src until DefaultRuntime, when the src channel is closed.
+	mr := measurer.New(conn, data.UUID)
+	src := mr.Start(ctx, spec.DefaultRuntime)
 	defer logging.Logger.Debug("sender: stop")
-	defer close(dst)
-	defer func() {
-		for range src {
-			// make sure we drain the channel
-		}
-	}()
+	defer mr.Stop(src)
+
 	logging.Logger.Debug("sender: generating random buffer")
 	bulkMessageSize := 1 << 13
 	preparedMessage, err := makePreparedMessage(bulkMessageSize)
 	if err != nil {
 		logging.Logger.WithError(err).Warn("sender: makePreparedMessage failed")
-		return
+		ndt7metrics.ClientSenderErrors.WithLabelValues(
+			proto, string(spec.SubtestDownload), "make-prepared-message").Inc()
+		return err
 	}
-	deadline := start.Add(spec.MaxRuntime)
+	// Record measurement start time
+	data.StartTime = time.Now().UTC()
+	deadline := data.StartTime.Add(spec.MaxRuntime)
 	err = conn.SetWriteDeadline(deadline) // Liveness!
 	if err != nil {
 		logging.Logger.WithError(err).Warn("sender: conn.SetWriteDeadline failed")
-		return
+		ndt7metrics.ClientSenderErrors.WithLabelValues(
+			proto, string(spec.SubtestDownload), "set-write-deadline").Inc()
+		return err
 	}
 	// One RTT sample is taken before flooding the connection with data.
 	// That sample is not affected by HOL, so it has additional value and is treated specially.
-	if err := message.SendTicks(conn, start, deadline); err != nil {
+	if err := message.SendTicks(conn, data.StartTime, deadline); err != nil {
 		logging.Logger.WithError(err).Warn("sender: ping.message.SendTicks failed")
-		return
+		return err
 	}
+
+	// Prepare recording of the endtime on return.
+	defer func() {
+		data.EndTime = time.Now().UTC()
+	}()
+
 	var totalSent int64
 	for {
 		select {
 		case m, ok := <-src:
-			if !ok { // This means that the previous step has terminated
+			if !ok { // This means that the measurer has terminated
 				closer.StartClosing(conn)
-				return
+				ndt7metrics.ClientSenderErrors.WithLabelValues(
+					proto, string(spec.SubtestDownload), "measurer-closed").Inc()
+				return nil
 			}
 			if err := conn.WriteJSON(m); err != nil {
 				logging.Logger.WithError(err).Warn("sender: conn.WriteJSON failed")
-				return
+				ndt7metrics.ClientSenderErrors.WithLabelValues(
+					proto, string(spec.SubtestDownload), "write-json").Inc()
+				return err
 			}
-			dst <- m // Liveness: this is blocking
-			if err := message.SendTicks(conn, start, deadline); err != nil {
+			// Only save measurements sent to the client.
+			data.ServerMeasurements = append(data.ServerMeasurements, m)
+			if err := message.SendTicks(conn, data.StartTime, deadline); err != nil {
 				logging.Logger.WithError(err).Warn("sender: ping.message.SendTicks failed")
-				return
+				ndt7metrics.ClientSenderErrors.WithLabelValues(
+					proto, string(spec.SubtestDownload), "ping-send-ticks").Inc()
+				return err
 			}
 		default:
 			if err := conn.WritePreparedMessage(preparedMessage); err != nil {
 				logging.Logger.WithError(err).Warn(
-					"sender: conn.WritePreparedMessage failed",
-				)
-				return
+					"sender: conn.WritePreparedMessage failed")
+				ndt7metrics.ClientSenderErrors.WithLabelValues(
+					proto, string(spec.SubtestDownload), "write-prepared-message").Inc()
+				return err
 			}
 			// The following block of code implements the scaling of message size
 			// as recommended in the spec's appendix. We're not accounting for the
@@ -82,7 +114,7 @@ func loop(conn *websocket.Conn, src <-chan model.Measurement, dst chan<- model.M
 			// scale deployments of this algorithm anyway, so there's no point
 			// in engaging in fine grained calibration before knowing.
 			totalSent += int64(bulkMessageSize)
-			if totalSent >= spec.MaxScaledMessageSize {
+			if int64(bulkMessageSize) >= spec.MaxScaledMessageSize {
 				continue // No further scaling is required
 			}
 			if int64(bulkMessageSize) > totalSent/spec.ScalingFraction {
@@ -92,22 +124,10 @@ func loop(conn *websocket.Conn, src <-chan model.Measurement, dst chan<- model.M
 			preparedMessage, err = makePreparedMessage(bulkMessageSize)
 			if err != nil {
 				logging.Logger.WithError(err).Warn("sender: makePreparedMessage failed")
-				return
+				ndt7metrics.ClientSenderErrors.WithLabelValues(
+					proto, string(spec.SubtestDownload), "make-prepared-message").Inc()
+				return err
 			}
 		}
 	}
-}
-
-// Start starts the sender in a background goroutine. The sender will send
-// binary messages and measurement messages coming from |src|. Such messages
-// will also be emitted to the returned channel.
-//
-// Liveness guarantee: the sender will not be stuck sending for more then
-// the MaxRuntime of the subtest, provided that the consumer will
-// continue reading from the returned channel. This is enforced by
-// setting the write deadline to |start| + MaxRuntime.
-func Start(conn *websocket.Conn, src <-chan model.Measurement, start time.Time) <-chan model.Measurement {
-	dst := make(chan model.Measurement)
-	go loop(conn, src, dst, start)
-	return dst
 }

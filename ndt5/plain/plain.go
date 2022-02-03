@@ -17,6 +17,7 @@ import (
 	"github.com/m-lab/ndt-server/ndt5/ndt"
 	"github.com/m-lab/ndt-server/ndt5/protocol"
 	"github.com/m-lab/ndt-server/ndt5/singleserving"
+	"github.com/m-lab/ndt-server/netx"
 )
 
 // plainServer handles requests that are TCP-based but not HTTP(S) based. If it
@@ -25,7 +26,7 @@ import (
 type plainServer struct {
 	wsAddr   string
 	dialer   *net.Dialer
-	listener *net.TCPListener
+	listener *netx.Listener
 	datadir  string
 	timeout  time.Duration
 }
@@ -122,17 +123,17 @@ func (ps *plainServer) sniffThenHandle(ctx context.Context, conn net.Conn) {
 	if n != len(kickoff) || err != nil {
 		log.Printf("Could not write %d byte kickoff string: %d bytes written err: %v\n", len(kickoff), n, err)
 	}
-	ndt5.HandleControlChannel(protocol.AdaptNetConn(conn, input), ps)
+	ndt5.HandleControlChannel(protocol.AdaptNetConn(conn, input), ps, "false")
 }
 
 // ListenAndServe starts up the sniffing server that delegates to the
 // appropriate just-TCP or WS protocol.Connection.
-func (ps *plainServer) ListenAndServe(ctx context.Context, addr string) error {
+func (ps *plainServer) ListenAndServe(ctx context.Context, addr string, tx Accepter) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	ps.listener = ln.(*net.TCPListener)
+	ps.listener = netx.NewListener(ln.(*net.TCPListener))
 	// Close the listener when the context is canceled. We do this in a separate
 	// goroutine to ensure that context cancellation interrupts the Accept() call.
 	go func() {
@@ -142,7 +143,7 @@ func (ps *plainServer) ListenAndServe(ctx context.Context, addr string) error {
 	// Serve requests until the context is canceled.
 	go func() {
 		for ctx.Err() == nil {
-			conn, err := ln.Accept()
+			conn, err := tx.Accept(ps.listener)
 			if err != nil {
 				log.Println("Failed to accept connection:", err)
 				continue
@@ -199,10 +200,16 @@ func (ps *plainServer) Addr() net.Addr {
 	return ps.listener.Addr()
 }
 
+// Accepter defines an interface the listening server to decide whether to
+// accept new connections.
+type Accepter interface {
+	Accept(l net.Listener) (net.Conn, error)
+}
+
 // Server is the interface implemented by the non-HTTP-based NDT server.
 // Because it isn't run by the http.Server machinery, it has its own interface.
 type Server interface {
-	ListenAndServe(ctx context.Context, addr string) error
+	ListenAndServe(ctx context.Context, addr string, tx Accepter) error
 	Addr() net.Addr
 }
 

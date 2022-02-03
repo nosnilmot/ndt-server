@@ -7,21 +7,19 @@ import (
 	"net"
 	"net/http"
 	"sync"
-
-	"github.com/m-lab/ndt-server/ndt5/ndt"
-
-	"github.com/m-lab/ndt-server/ndt5/ws"
-	"github.com/m-lab/ndt-server/ndt7/listener"
+	"time"
 
 	ndt5metrics "github.com/m-lab/ndt-server/ndt5/metrics"
+	"github.com/m-lab/ndt-server/ndt5/ndt"
 	"github.com/m-lab/ndt-server/ndt5/protocol"
-	"github.com/m-lab/ndt-server/ndt5/tcplistener"
+	"github.com/m-lab/ndt-server/ndt5/ws"
+	"github.com/m-lab/ndt-server/netx"
 )
 
 // wsServer is a single-serving server for unencrypted websockets.
 type wsServer struct {
 	srv        *http.Server
-	listener   *listener.CachingTCPKeepAliveListener
+	listener   *netx.Listener
 	port       int
 	direction  string
 	newConn    protocol.MeasuredConnection
@@ -106,6 +104,12 @@ func listenWS(direction string) (*wsServer, error) {
 	s := &wsServer{
 		srv: &http.Server{
 			Handler: mux,
+			// NOTE: set absolute read and write timeouts for server connections.
+			// This prevents clients, or middleboxes, from opening a connection and
+			// holding it open indefinitely. This applies equally to TLS and non-TLS
+			// servers.
+			ReadTimeout:  time.Minute,
+			WriteTimeout: time.Minute,
 		},
 		direction: direction,
 		kind:      ndt.WS,
@@ -120,7 +124,7 @@ func listenWS(direction string) (*wsServer, error) {
 	}
 	tcpl := l.(*net.TCPListener)
 	s.port = tcpl.Addr().(*net.TCPAddr).Port
-	s.listener = &listener.CachingTCPKeepAliveListener{TCPListener: tcpl}
+	s.listener = netx.NewListener(tcpl)
 	return s, nil
 }
 
@@ -172,7 +176,8 @@ func (ps *plainServer) Port() int {
 }
 
 func (ps *plainServer) ServeOnce(ctx context.Context) (protocol.MeasuredConnection, error) {
-	derivedCtx, derivedCancel := context.WithCancel(ctx)
+	// NOTE: set an absolute timeouts for single serving servers.
+	derivedCtx, derivedCancel := context.WithTimeout(ctx, time.Minute)
 	defer ps.Close()
 
 	var conn net.Conn
@@ -211,7 +216,7 @@ func ListenPlain(direction string) (ndt.SingleMeasurementServer, error) {
 		return nil, err
 	}
 	tcpl := l.(*net.TCPListener)
-	s.listener = &tcplistener.RawListener{TCPListener: tcpl}
-	s.port = s.listener.Addr().(*net.TCPAddr).Port
+	s.port = tcpl.Addr().(*net.TCPAddr).Port
+	s.listener = netx.NewListener(tcpl)
 	return s, nil
 }

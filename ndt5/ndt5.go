@@ -38,7 +38,7 @@ const (
 )
 
 // SaveData archives the data to disk.
-func SaveData(record *data.NDTResult, datadir string) {
+func SaveData(record *data.NDT5Result, datadir string) {
 	if record == nil {
 		log.Println("nil record won't be saved")
 		return
@@ -58,7 +58,7 @@ func SaveData(record *data.NDTResult, datadir string) {
 	enc := json.NewEncoder(file)
 	err = enc.Encode(record)
 	if err != nil {
-		log.Println("Could not encode", record, "to", file.Name())
+		log.Println("ERROR: Could not encode", record, "to", file.Name(), "err:", err)
 		return
 	}
 	log.Println("Wrote", file.Name())
@@ -87,25 +87,13 @@ func panicMsgToErrType(msg string) string {
 	return "panic"
 }
 
-func getResultLabel(err error, rate float64) string {
-	withErr := "okay"
-	if err != nil {
-		withErr = "error"
-	}
-	withResult := "-with-rate"
-	if rate == 0 {
-		withResult = "-without-rate"
-	}
-	return withErr + withResult
-}
-
 // HandleControlChannel is the "business logic" of an NDT test. It is designed
 // to run every test, and to never need to know whether the underlying
 // connection is just a TCP socket, a WS connection, or a WSS connection. It
 // only needs a connection, and a factory for making single-use servers for
 // connections of that same type.
-func HandleControlChannel(conn protocol.Connection, s ndt.Server) {
-	connType := s.ConnectionType().String()
+func HandleControlChannel(conn protocol.Connection, s ndt.Server, isMon string) {
+	connType := s.ConnectionType().Label()
 	metrics.ActiveTests.WithLabelValues(connType).Inc()
 	defer metrics.ActiveTests.WithLabelValues(connType).Dec()
 	defer func(start time.Time) {
@@ -124,9 +112,10 @@ func HandleControlChannel(conn protocol.Connection, s ndt.Server) {
 		}
 		ndt5metrics.ControlCount.WithLabelValues(connType, completed).Inc()
 	}()
-	handleControlChannel(conn, s)
+	handleControlChannel(conn, s, isMon)
 }
-func handleControlChannel(conn protocol.Connection, s ndt.Server) {
+
+func handleControlChannel(conn protocol.Connection, s ndt.Server, isMon string) {
 	// Nothing should take more than 45 seconds, and exiting this method should
 	// cause all resources used by the test to be reclaimed.
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -134,10 +123,10 @@ func handleControlChannel(conn protocol.Connection, s ndt.Server) {
 
 	log.Println("Handling connection", conn)
 	defer warnonerror.Close(conn, "Could not close "+conn.String())
-	connType := s.ConnectionType().String()
+	connType := s.ConnectionType().Label()
 	sIP, sPort := conn.ServerIPAndPort()
 	cIP, cPort := conn.ClientIPAndPort()
-	record := &data.NDTResult{
+	record := &data.NDT5Result{
 		GitShortCommit: prometheusx.GitShortCommit,
 		Version:        version.Version,
 		StartTime:      time.Now(),
@@ -217,9 +206,9 @@ func handleControlChannel(conn protocol.Connection, s ndt.Server) {
 		record.C2S, err = c2s.ManageTest(ctx, conn, s)
 		if record.C2S != nil && record.C2S.MeanThroughputMbps != 0 {
 			c2sRate = record.C2S.MeanThroughputMbps
-			metrics.TestRate.WithLabelValues(connType, "c2s").Observe(c2sRate)
+			metrics.TestRate.WithLabelValues(connType, "c2s", isMon).Observe(c2sRate)
 		}
-		r := getResultLabel(err, record.C2S.MeanThroughputMbps)
+		r := metrics.GetResultLabel(err, record.C2S.MeanThroughputMbps)
 		ndt5metrics.ClientTestResults.WithLabelValues(connType, "c2s", r).Inc()
 		rtx.PanicOnError(err, "C2S - Could not run c2s test (uuid: %s)", record.Control.UUID)
 	}
@@ -227,9 +216,9 @@ func handleControlChannel(conn protocol.Connection, s ndt.Server) {
 		record.S2C, err = s2c.ManageTest(ctx, conn, s)
 		if record.S2C != nil && record.S2C.MeanThroughputMbps != 0 {
 			s2cRate = record.S2C.MeanThroughputMbps
-			metrics.TestRate.WithLabelValues(connType, "s2c").Observe(s2cRate)
+			metrics.TestRate.WithLabelValues(connType, "s2c", isMon).Observe(s2cRate)
 		}
-		r := getResultLabel(err, record.S2C.MeanThroughputMbps)
+		r := metrics.GetResultLabel(err, record.S2C.MeanThroughputMbps)
 		ndt5metrics.ClientTestResults.WithLabelValues(connType, "s2c", r).Inc()
 		rtx.PanicOnError(err, "S2C - Could not run s2c test (uuid: %s)", record.Control.UUID)
 	}
