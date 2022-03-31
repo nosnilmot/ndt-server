@@ -46,7 +46,8 @@ mkdir -p "${DATA_DIR}"/tcpinfo
   --tcpinfo.eventsocket=/var/local/tcpeventsocket.sock \
   &
 
-while [[ ! -e /var/local/tcpeventsocket.sock ]]; do
+echo "Waiting for the tcpinfo eventsocket to become available..."
+while ! socat -u OPEN:/dev/null UNIX-CONNECT:/var/local/tcpeventsocket.sock; do
   sleep 1
 done
 
@@ -55,7 +56,8 @@ mkdir -p "${DATA_DIR}"/traceroute
 /traceroute-caller \
   --prometheusx.listen-address=:9992 \
   --uuid-prefix-file="${UUID_FILE}" \
-  --outputPath="${DATA_DIR}"/traceroute \
+  --hopannotation-output="${DATA_DIR}"/hopannotation1 \
+  --traceroute-output="${DATA_DIR}"/scamper1 \
   --tcpinfo.eventsocket=/var/local/tcpeventsocket.sock \
   &
 

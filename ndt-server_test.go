@@ -9,16 +9,19 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
+	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/m-lab/go/flagx"
 	"github.com/m-lab/go/osx"
 	"github.com/m-lab/go/prometheusx/promtest"
 	"github.com/m-lab/go/rtx"
-
-	pipe "gopkg.in/m-lab/pipe.v3"
+	"github.com/m-lab/ndt-server/metadata"
+	"go.uber.org/goleak"
+	"gopkg.in/m-lab/pipe.v3"
 )
 
 // Get a bunch of open ports, and then close them. Hopefully the ports will
@@ -90,6 +93,16 @@ func setupMain() func() {
 	}
 }
 
+// Define goleak's testing interface.
+type fakeT struct {
+	t *testing.T
+}
+
+// Throw an error when a leak is detected.
+func (ft *fakeT) Error(args ...interface{}) {
+	ft.t.Errorf("Found leaked goroutines: %v", args)
+}
+
 func Test_ContextCancelsMain(t *testing.T) {
 	// Set up certs and the environment vars for the commandline.
 	cleanup := setupMain()
@@ -97,7 +110,6 @@ func Test_ContextCancelsMain(t *testing.T) {
 
 	// Set up the global context for main()
 	ctx, cancel = context.WithCancel(context.Background())
-	before := runtime.NumGoroutine()
 
 	// Run main, but cancel it very soon after starting.
 	go func() {
@@ -107,14 +119,8 @@ func Test_ContextCancelsMain(t *testing.T) {
 	// If this doesn't run forever, then canceling the context causes main to exit.
 	main()
 
-	// A sleep has been added here to allow all completed goroutines to exit.
-	time.Sleep(100 * time.Millisecond)
-
-	// Make sure main() doesn't leak goroutines.
-	after := runtime.NumGoroutine()
-	if before != after {
-		t.Errorf("After running NumGoroutines changed: %d to %d", before, after)
-	}
+	// Verify that there are no unexpected goroutines running at the end of the test.
+	goleak.VerifyNone(&fakeT{t})
 }
 
 func TestMetrics(t *testing.T) {
@@ -309,4 +315,70 @@ func Test_MainIntegrationTest(t *testing.T) {
 		}(c)
 	}
 	wg.Wait()
+}
+
+func Test_ParseDeploymentLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   []metadata.NameValue
+	}{
+		{
+			name: "labels-defined",
+			labels: []string{
+				"machine-type=virtual",
+				"deployment=canary",
+			},
+			want: []metadata.NameValue{
+				{
+					Name:  "machine-type",
+					Value: "virtual",
+				},
+				{
+					Name:  "deployment",
+					Value: "canary",
+				},
+			},
+		},
+		{
+			name: "only-one",
+			labels: []string{
+				"deployment=osupgrade",
+			},
+			want: []metadata.NameValue{
+				{
+					Name:  "deployment",
+					Value: "osupgrade",
+				},
+			},
+		},
+		{
+			name:   "empty",
+			labels: []string{},
+			want:   []metadata.NameValue{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deploymentLabels = flagx.KeyValue{}
+			for _, label := range tt.labels {
+				deploymentLabels.Set(label)
+			}
+
+			serverMetadata := parseDeploymentLabels()
+			sortNameValueSlice(serverMetadata)
+			sortNameValueSlice(tt.want)
+
+			if !reflect.DeepEqual(serverMetadata, tt.want) {
+				t.Errorf("ndt-server.parseDeploymentLabels() got = %v, want %v", serverMetadata, tt.want)
+			}
+		})
+	}
+}
+
+func sortNameValueSlice(nv []metadata.NameValue) {
+	sort.Slice(nv, func(i, j int) bool {
+		return nv[i].Name < nv[j].Name
+	})
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -17,12 +18,14 @@ import (
 	"github.com/m-lab/go/prometheusx"
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/ndt-server/logging"
+	"github.com/m-lab/ndt-server/metadata"
 	ndt5handler "github.com/m-lab/ndt-server/ndt5/handler"
 	"github.com/m-lab/ndt-server/ndt5/plain"
 	"github.com/m-lab/ndt-server/ndt7/handler"
 	"github.com/m-lab/ndt-server/ndt7/listener"
 	"github.com/m-lab/ndt-server/ndt7/spec"
 	"github.com/m-lab/ndt-server/platformx"
+	"github.com/m-lab/ndt-server/version"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -37,8 +40,10 @@ var (
 	ndt5WssAddr       = flag.String("ndt5_wss_addr", ":3010", "The address and port to use for the ndt5 WSS test")
 	certFile          = flag.String("cert", "", "The file with server certificates in PEM format.")
 	keyFile           = flag.String("key", "", "The file with server key in PEM format.")
+	tlsVersion        = flag.String("tls.version", "", "Minimum TLS version. Valid values: 1.2 or 1.3")
 	dataDir           = flag.String("datadir", "/var/spool/ndt", "The directory in which to write data files")
 	htmlDir           = flag.String("htmldir", "html", "The directory from which to serve static web content.")
+	deploymentLabels  = flagx.KeyValue{}
 	tokenVerifyKey    = flagx.FileBytesArray{}
 	tokenRequired5    bool
 	tokenRequired7    bool
@@ -59,6 +64,7 @@ func init() {
 	flag.BoolVar(&tokenRequired5, "ndt5.token.required", false, "Require access token in NDT5 requests")
 	flag.BoolVar(&tokenRequired7, "ndt7.token.required", false, "Require access token in NDT7 requests")
 	flag.StringVar(&tokenMachine, "token.machine", "", "Use given machine name to verify token claims")
+	flag.Var(&deploymentLabels, "label", "Labels to identify the type of deployment.")
 }
 
 func catchSigterm() {
@@ -96,9 +102,21 @@ func init() {
 
 // httpServer creates a new *http.Server with explicit Read and Write timeouts.
 func httpServer(addr string, handler http.Handler) *http.Server {
+	tlsconf := &tls.Config{}
+	switch *tlsVersion {
+	case "1.3":
+		tlsconf = &tls.Config{
+			MinVersion: tls.VersionTLS13,
+		}
+	case "1.2":
+		tlsconf = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
 	return &http.Server{
-		Addr:    addr,
-		Handler: handler,
+		Addr:      addr,
+		Handler:   handler,
+		TLSConfig: tlsconf,
 		// NOTE: set absolute read and write timeouts for server connections.
 		// This prevents clients, or middleboxes, from opening a connection and
 		// holding it open indefinitely. This applies equally to TLS and non-TLS
@@ -108,9 +126,36 @@ func httpServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+// parseDeploymentLabels() returns an array of key-value pairs of type
+// []metadata.NameValue with the deployment label pairs passed in through
+// the "label" flag.
+func parseDeploymentLabels() []metadata.NameValue {
+	labels := deploymentLabels.Get()
+	serverMetadata := make([]metadata.NameValue, len(labels))
+	index := 0
+
+	for k, v := range labels {
+		serverMetadata[index] = metadata.NameValue{
+			Name:  k,
+			Value: v,
+		}
+		index++
+
+		// Add "-canary" to version, if applicable.
+		if k == "deployment" && v == "canary" {
+			version.Version += "-canary"
+		}
+	}
+
+	return serverMetadata
+}
+
 func main() {
 	flag.Parse()
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not parse env args")
+
+	serverMetadata := parseDeploymentLabels()
+
 	// TODO: Decide if signal handling is the right approach here.
 	go catchSigterm()
 
@@ -134,7 +179,7 @@ func main() {
 
 	// The ndt5 protocol serving non-HTTP-based tests - forwards to Ws-based
 	// server if the first three bytes are "GET".
-	ndt5Server := plain.NewServer(*dataDir+"/ndt5", *ndt5WsAddr)
+	ndt5Server := plain.NewServer(*dataDir+"/ndt5", *ndt5WsAddr, serverMetadata)
 	rtx.Must(
 		ndt5Server.ListenAndServe(ctx, *ndt5Addr, tx5),
 		"Could not start raw server")
@@ -143,7 +188,7 @@ func main() {
 	// connect to the raw server, which will forward things along.
 	ndt5WsMux := http.NewServeMux()
 	ndt5WsMux.Handle("/", http.FileServer(http.Dir(*htmlDir)))
-	ndt5WsMux.Handle("/ndt_protocol", ndt5handler.NewWS(*dataDir+"/ndt5"))
+	ndt5WsMux.Handle("/ndt_protocol", ndt5handler.NewWS(*dataDir+"/ndt5", serverMetadata))
 	controller.AllowPathLabel("/ndt_protocol")
 	ndt5WsServer := httpServer(
 		*ndt5WsAddr,
@@ -159,9 +204,10 @@ func main() {
 	ndt7Mux := http.NewServeMux()
 	ndt7Mux.Handle("/", http.FileServer(http.Dir(*htmlDir)))
 	ndt7Handler := &handler.Handler{
-		DataDir:      *dataDir,
-		SecurePort:   *ndt7Addr,
-		InsecurePort: *ndt7AddrCleartext,
+		DataDir:        *dataDir,
+		SecurePort:     *ndt7Addr,
+		InsecurePort:   *ndt7AddrCleartext,
+		ServerMetadata: serverMetadata,
 	}
 	ndt7Mux.Handle(spec.DownloadURLPath, http.HandlerFunc(ndt7Handler.Download))
 	ndt7Mux.Handle(spec.UploadURLPath, http.HandlerFunc(ndt7Handler.Upload))
@@ -180,7 +226,7 @@ func main() {
 		// The ndt5 protocol serving WsS-based tests.
 		ndt5WssMux := http.NewServeMux()
 		ndt5WssMux.Handle("/", http.FileServer(http.Dir(*htmlDir)))
-		ndt5WssMux.Handle("/ndt_protocol", ndt5handler.NewWSS(*dataDir+"/ndt5", *certFile, *keyFile))
+		ndt5WssMux.Handle("/ndt_protocol", ndt5handler.NewWSS(*dataDir+"/ndt5", *certFile, *keyFile, serverMetadata))
 		ndt5WssServer := httpServer(
 			*ndt5WssAddr,
 			ac5.Then(logging.MakeAccessLogHandler(ndt5WssMux)),

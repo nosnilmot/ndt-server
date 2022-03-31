@@ -131,8 +131,9 @@ func handleControlChannel(conn protocol.Connection, s ndt.Server, isMon string) 
 		Version:        version.Version,
 		StartTime:      time.Now(),
 		Control: &control.ArchivalData{
-			UUID:     conn.UUID(),
-			Protocol: s.ConnectionType(),
+			UUID:           conn.UUID(),
+			Protocol:       s.ConnectionType(),
+			ServerMetadata: s.Metadata(),
 		},
 		ServerIP:   sIP,
 		ServerPort: sPort,
